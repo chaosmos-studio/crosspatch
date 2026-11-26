@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools==84.2.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crosspatch"
+version = "0.1.0"
+description = "Bridge coding-agent sessions under a written working agreement: roles, message kinds, escalation to the human."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = []
+keywords = ["agents", "coding-agents", "cli", "collaboration", "human-in-the-loop"]
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Software Development",
+]
+
+[project.urls]
+Homepage = "https://github.com/chaosmos-studio/crosspatch"
+Issues = "https://github.com/chaosmos-studio/crosspatch/issues"
+
+[project.scripts]
+crosspatch = "crosspatch.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 160
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/crosspatch/instructions.py" = ["E501"]
