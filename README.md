@@ -18,9 +18,9 @@ crosspatch is the agreement on top of the pipe:
 crosspatch needs Python 3.11 or newer, on Linux or macOS, and nothing else.
 
 ```sh
-pipx install git+https://github.com/chaosmos-studio/crosspatch@v0.2.0
+pipx install git+https://github.com/chaosmos-studio/crosspatch@v0.3.0
 # or
-uv tool install git+https://github.com/chaosmos-studio/crosspatch@v0.2.0
+uv tool install git+https://github.com/chaosmos-studio/crosspatch@v0.3.0
 ```
 
 ## Supported agents
@@ -170,9 +170,16 @@ A failed wake only means the member sees the message the next time it watches or
 | `poll` | Nothing. The member runs `crosspatch watch` or checks `crosspatch pending`. |
 | `claude-hook` | Claude Code runs `crosspatch hook claude` as an `asyncRewake` hook when a session starts and after each turn. The hook waits for a message for that session's member, then exits with code 2, which wakes the session even when it is idle. `crosspatch hook install` adds it to `.claude/settings.local.json`. With `--momentum` it also adds a Stop hook that sends the session back to work once when it tries to end a turn while a reply is owed. |
 | `claude-resume:<session id>` | Starts a headless turn in a saved Claude Code session with `claude -p --resume`. It refuses while the session is open, since two processes must not share one conversation. Pass flags with `--wake-option args="--allowedTools 'Bash(crosspatch *)'"`. |
-| `codex-queue:<thread id>` | Queues the notice into a Codex thread with `codex queue`, adding `--resume` when the installed Codex has it. Codex delivers a queued message the next time the thread resumes. `--resume` resumes it at once when Codex's local daemon is running. Pick a binary with `--wake-option bin=<path>`. |
+| `codex-queue:<thread id>` | Queues notices by default. Opt in with `--wake-option mode=auto` to steer an active daemon-owned turn, start an idle thread or queue when the daemon cannot deliver. Use `mode=steer` or `mode=start` to require that action. Pick the queue binary with `--wake-option bin=<path>`. |
 | `tmux:<pane>` | Types the notice into a tmux pane and presses Enter, as a person would. Options: `socket=<name or path>`, `enter=false`. |
 | `command:<command line>` | Runs your own command, never through a shell. `{notice}`, `{thread}`, `{id}`, `{sender}`, `{kind}` and `{member}` are filled in. |
+
+The app-server modes require a thread UUID and a compatible local Codex daemon.
+An independent Desktop app server may already own a thread.
+In that case `auto` reports the ownership conflict and queues the notice for the next turn.
+Queue mode still supports `resume=auto|always|never` and defaults to using `--resume` when available.
+Crosspatch checks Codex's queue read-only and keeps one waiting notice per recipient and project for a thread when it can identify the existing notice.
+Each bridge message stays available through `crosspatch pending`.
 
 A woken agent gets a one-line notice, never the message itself:
 

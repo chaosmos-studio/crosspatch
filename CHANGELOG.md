@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- The Codex wake adapter can steer a running daemon-owned turn or start an idle thread.
+- Queue mode remains the default, and automatic mode falls back to it when the daemon rejects a wake.
+- Crosspatch coalesces waiting notices without writing to Codex's queue database.
+
 ## 0.2.0
 
 - Delegation, which only the human turns on: with `[delegation] lead_speaks_for_human = true` in `bridge.toml`, a BRIEF or REPLY from a lead reaches builders as the human's instruction.
