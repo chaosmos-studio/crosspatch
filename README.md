@@ -18,9 +18,9 @@ crosspatch is the agreement on top of the pipe:
 crosspatch needs Python 3.11 or newer, on Linux or macOS, and nothing else.
 
 ```sh
-pipx install git+https://github.com/chaosmos-studio/crosspatch@v0.1.0
+pipx install git+https://github.com/chaosmos-studio/crosspatch@v0.2.0
 # or
-uv tool install git+https://github.com/chaosmos-studio/crosspatch@v0.1.0
+uv tool install git+https://github.com/chaosmos-studio/crosspatch@v0.2.0
 ```
 
 ## Supported agents

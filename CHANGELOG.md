@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Delegation, which only the human turns on: with `[delegation] lead_speaks_for_human = true` in `bridge.toml`, a BRIEF or REPLY from a lead reaches builders as the human's instruction.
+  The wake notice, the header above the messages and the generated instructions all say so, so a builder acts without asking the human again.
+  Messages from other members stay information, and each agent's own permission rules and the escalation rules still apply.
+- New projects get the `[delegation]` table in `bridge.toml`, switched off.
+
 ## 0.1.0
 
 - Threads of numbered markdown messages with front matter, written so no reader sees half a message and no two writers share a number.
