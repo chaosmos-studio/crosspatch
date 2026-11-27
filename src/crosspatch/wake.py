@@ -13,13 +13,16 @@ import json
 import os
 import shlex
 import shutil
+import sqlite3
 import subprocess
+from contextlib import closing
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
+from uuid import UUID
 
-from crosspatch import fsutil
-from crosspatch.discovery import claude_home, tmux_command
+from crosspatch import codex_app, fsutil
+from crosspatch.discovery import claude_home, codex_home, tmux_command
 from crosspatch.errors import UsageError
 from crosspatch.project import Project
 from crosspatch.registry import Member, Wake
@@ -114,34 +117,106 @@ def _codex_queue_has_resume(binary: str) -> bool:
 
 class CodexQueue(Adapter):
     name = "codex-queue"
-    summary = "Queue the notice into a Codex thread with `codex queue`, and resume it where Codex supports that."
+    summary = "Queue a notice or use the local Codex daemon to steer or start a turn."
     takes_target = True
 
     def _binary(self, member: Member) -> str:
         return member.wake.options.get("bin") or os.environ.get("CROSSPATCH_CODEX") or "codex"
 
     def check(self, project: Project, member: Member) -> Result:
+        mode = member.wake.options.get("mode", "queue")
+        if mode not in {"auto", "steer", "start", "queue"}:
+            return Result(False, "mode must be auto, steer, start or queue")
         binary = self._binary(member)
-        if shutil.which(binary) is None:
+        if mode in {"auto", "queue"} and shutil.which(binary) is None:
             return Result(False, f"{binary} is not installed or not on PATH")
+        if mode != "queue":
+            return Result(True, f"{mode} via the local Codex app-server socket")
         resume = "with --resume" if _codex_queue_has_resume(binary) else "without --resume (this Codex has no such flag)"
         return Result(True, f"{binary} queue {resume}")
 
     def wake(self, project: Project, member: Member, notice: Notice) -> Result:
+        mode = member.wake.options.get("mode", "queue")
+        if mode not in {"auto", "steer", "start", "queue"}:
+            return Result(False, "mode must be auto, steer, start or queue")
+        try:
+            thread_id = str(UUID(member.wake.target))
+        except ValueError:
+            thread_id = ""
+        if mode == "queue":
+            return self._queue(project, member, notice, thread_id)
+        failure = "the app-server modes require a Codex thread UUID"
+        if thread_id:
+            socket_path = codex_home() / "app-server-control" / "app-server-control.sock"
+            try:
+                return Result(True, codex_app.deliver(socket_path, thread_id, notice.text(), mode))
+            except codex_app.Unavailable as error:
+                failure = str(error)
+            except codex_app.Unconfirmed as error:
+                return Result(False, str(error))
+        if mode == "auto":
+            return self._queue(project, member, notice, thread_id, failure)
+        return Result(False, failure)
+
+    def _queue(self, project: Project, member: Member, notice: Notice, thread_id: str, fallback: str = "") -> Result:
+        if not thread_id:
+            return self._enqueue(member, notice, fallback)
+        lock = project.state_dir / "locks" / f"codex-queue-{thread_id}.lock"
+        try:
+            with fsutil.locked(lock):
+                if _codex_notice_is_waiting(thread_id, project, notice.recipient):
+                    detail = "a Crosspatch notice for this project is already queued"
+                    return Result(True, f"{detail} ({fallback})" if fallback else detail)
+                return self._enqueue(member, notice, fallback)
+        except (OSError, TimeoutError) as error:
+            return Result(False, str(error))
+
+    def _enqueue(self, member: Member, notice: Notice, fallback: str) -> Result:
         binary = self._binary(member)
         command = [binary, "queue", "--thread", member.wake.target, "--message", notice.text()]
         mode = member.wake.options.get("resume", "auto")
-        resume = mode == "always" or (mode == "auto" and _codex_queue_has_resume(binary))
+        resume = not fallback and (mode == "always" or (mode == "auto" and _codex_queue_has_resume(binary)))
         if resume:
             command.append("--resume")
         result, output = _run(command)
         if not result.ok:
             return result
+        if fallback:
+            return Result(True, f"queued without resuming: {fallback}")
         if not resume:
+            if mode == "never":
+                return Result(True, "queued without resuming")
             return Result(True, "queued. Codex delivers it the next time the thread resumes (this Codex has no --resume)")
+        if "already has an active writer" in output:
+            return Result(True, "queued, not resumed: another Codex app server owns the thread, such as the Desktop app")
         if "could not resume" in output:
-            return Result(True, "queued, not resumed: Codex found no local daemon, so it delivers it the next time the thread resumes")
+            if "daemon" in output and ("not running" in output or "no local daemon" in output):
+                return Result(True, "queued, not resumed: Codex found no local daemon")
+            return Result(True, "queued, but Codex could not resume the thread")
         return Result(True, "queued and resumed")
+
+
+def _codex_notice_is_waiting(thread_id: str, project: Project, recipient: str) -> bool:
+    database = codex_home() / "queue_1.sqlite"
+    if not database.is_file():
+        return False
+    suffix = f"`crosspatch -C {shlex.quote(str(project.root))} pending --as {recipient}`"
+    try:
+        with closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True, timeout=0.25)) as db:
+            rows = db.execute("SELECT payload_json FROM queued_items WHERE thread_id = ?", (thread_id,))
+            for (payload,) in rows:
+                try:
+                    content = json.loads(payload)["UserInput"]["content"]
+                except (TypeError, ValueError, KeyError):
+                    continue
+                if not isinstance(content, list) or len(content) != 1 or not isinstance(content[0], dict):
+                    continue
+                text = content[0].get("text")
+                if content[0].get("type") == "text" and isinstance(text, str) and text.startswith("[crosspatch] New ") and suffix in text:
+                    return True
+    except (OSError, sqlite3.Error):
+        return False
+    return False
 
 
 def claude_hook_lock(project: Project, member: str) -> Path:

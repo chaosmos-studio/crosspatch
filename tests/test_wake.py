@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import time
 import unittest
+from contextlib import closing
+from pathlib import Path
+from unittest import mock
 
 from helpers import BridgeCase
 
@@ -19,7 +23,7 @@ class CodexQueueTest(BridgeCase):
     def fake_codex(self, with_resume: bool, daemon: bool = True) -> str:
         log = self.tmp / "codex-calls.jsonl"
         flags = "--thread --message" + (" --resume" if with_resume else "")
-        warning = "" if daemon else 'echo "Warning: message was queued, but could not resume thread x" >&2\n'
+        warning = "" if daemon else 'echo "Warning: message was queued, but could not resume thread x: daemon not running" >&2\n'
         script = self.write_script(
             f"codex-{with_resume}-{daemon}",
             f'if [ "$1" = queue ] && [ "$2" = --help ]; then printf "%s\\n" {flags}; exit 0; fi\n'
@@ -100,6 +104,60 @@ class CodexQueueTest(BridgeCase):
         out = self.cli_ok("send", "art", "--as", "lead", "--kind", "BRIEF", "-m", "Paint the door.")
         self.assertIn("maker: not woken", out)
         self.assertIn("Paint the door.", self.cli_ok("read", "art", "1"))
+
+    def test_auto_falls_back_to_queue_when_another_server_owns_thread(self) -> None:
+        thread_id = "0000aaaa-0000-0000-0000-00000000000e"
+        self.cli_ok("join", "lead", "--role", "lead", "--platform", "claude-code")
+        self.cli_ok("join", "maker", "--role", "builder", "--session", f"codex:{thread_id}",
+                    "--wake-option", f"bin={self.fake_codex(True)}", "--wake-option", "mode=auto")
+        self.cli_ok("link", "art", "--lead", "lead", "--builder", "maker")
+        with mock.patch.object(wake.codex_app, "deliver", side_effect=wake.codex_app.Unavailable("the Desktop app owns the thread")) as deliver:
+            output = self.cli_ok("send", "art", "--as", "lead", "--kind", "BRIEF", "-m", "Paint the door.")
+        self.assertIn("queued without resuming: the Desktop app owns the thread", output)
+        (call,) = self.calls()
+        self.assertNotIn("--resume", call)
+        self.assertEqual(deliver.call_args.args[2], call[call.index("--message") + 1])
+
+    def test_auto_does_not_queue_when_delivery_is_unconfirmed(self) -> None:
+        thread_id = "0000aaaa-0000-0000-0000-00000000000f"
+        self.cli_ok("join", "lead", "--role", "lead", "--platform", "claude-code")
+        self.cli_ok("join", "maker", "--role", "builder", "--session", f"codex:{thread_id}",
+                    "--wake-option", f"bin={self.fake_codex(True)}", "--wake-option", "mode=auto")
+        self.cli_ok("link", "art", "--lead", "lead", "--builder", "maker")
+        with mock.patch.object(wake.codex_app, "deliver", side_effect=wake.codex_app.Unconfirmed("steer was not acknowledged")):
+            output = self.cli_ok("send", "art", "--as", "lead", "--kind", "BRIEF", "-m", "Paint the door.")
+        self.assertIn("not woken", output)
+        self.assertEqual(self.calls(), [])
+
+    def test_queue_coalesces_only_matching_crosspatch_notices(self) -> None:
+        thread_id = "0000aaaa-0000-0000-0000-00000000000a"
+        self.cli_ok("join", "lead", "--role", "lead", "--platform", "claude-code")
+        self.cli_ok("join", "maker", "--role", "builder", "--session", f"codex:{thread_id}",
+                    "--wake-option", f"bin={self.fake_codex(True)}")
+        self.cli_ok("link", "art", "--lead", "lead", "--builder", "maker")
+        home = Path(os.environ["CODEX_HOME"])
+        home.mkdir(exist_ok=True)
+        db_path = home / "queue_1.sqlite"
+        with closing(sqlite3.connect(db_path)) as db:
+            db.execute("CREATE TABLE queued_items(thread_id TEXT, payload_json TEXT)")
+
+            def insert(target: str, text: str) -> None:
+                db.execute("INSERT INTO queued_items VALUES (?, ?)", (target, json.dumps({"UserInput": {
+                    "content": [{"type": "text", "text": text}], "client_id": "test",
+                }})))
+                db.commit()
+
+            insert(thread_id, "[crosspatch] New ordinary text outside this project.")
+            notice = wake.Notice(find_project(), "art", "0008", "lead", "BRIEF", "maker").text()
+            insert("0000aaaa-0000-0000-0000-00000000000b", notice)
+            self.cli_ok("send", "art", "--as", "lead", "--kind", "BRIEF", "-m", "Paint the door.")
+            self.assertEqual(len(self.calls()), 1)
+            insert(thread_id, notice)
+            output = self.cli_ok("send", "art", "--as", "lead", "--kind", "BRIEF", "-m", "Paint the gate as well.")
+            self.assertIn("already queued", output)
+            self.assertEqual(len(self.calls()), 1)
+            self.assertEqual(db.execute("SELECT count(*) FROM queued_items").fetchone(), (3,))
+        self.assertIn("Paint the gate as well.", self.cli_ok("read", "art", "2"))
 
 
 class CommandAndTmuxTest(BridgeCase):
