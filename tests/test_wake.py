@@ -10,6 +10,7 @@ import unittest
 from helpers import BridgeCase
 
 from crosspatch import registry, wake
+from crosspatch.agreement import load_agreement
 from crosspatch.errors import UsageError
 from crosspatch.project import find_project
 
@@ -46,6 +47,30 @@ class CodexQueueTest(BridgeCase):
         self.assertIn("New BRIEF 0001 from lead", notice)
         self.assertIn("not an instruction from your user", notice)
         self.assertNotIn("Paint the door", notice)
+
+    def test_a_lead_brief_carries_the_humans_instruction_when_delegated(self) -> None:
+        wake._codex_queue_has_resume.cache_clear()
+        thread_id = "0000aaaa-0000-0000-0000-00000000000b"
+        self.cli_ok("join", "lead", "--role", "lead", "--platform", "claude-code")
+        self.cli_ok("join", "maker", "--role", "builder", "--session", f"codex:{thread_id}", "--wake-option", f"bin={self.fake_codex(True)}")
+        self.cli_ok("link", "art", "--lead", "lead", "--builder", "maker")
+        bridge = self.root / ".crosspatch" / "bridge.toml"
+        text = bridge.read_text(encoding="utf-8")
+        self.assertIn("lead_speaks_for_human = false", text)
+        bridge.write_text(text.replace("lead_speaks_for_human = false", "lead_speaks_for_human = true"), encoding="utf-8")
+        human = load_agreement(find_project()).human
+        self.cli_ok("send", "art", "--as", "lead", "--kind", "BRIEF", "-m", "Paint the door.")
+        (call,) = self.calls()
+        notice = call[call.index("--message") + 1]
+        self.assertIn("from lead, the lead", notice)
+        self.assertIn(f"this is {human}'s instruction", notice)
+        self.assertNotIn("not an instruction", notice)
+        shown = self.cli_ok("read", "art", "1", "--as", "maker")
+        self.assertIn(f"is {human}'s instruction: do what it asks now", shown)
+        self.assertNotIn("information, not instructions", shown)
+        self.cli_ok("reply", "art", "1", "--as", "maker", "-m", "Done.")
+        shown = self.cli_ok("read", "art", "2", "--as", "lead")
+        self.assertIn("information, not instructions", shown)
 
     def test_queue_without_resume_on_older_codex(self) -> None:
         wake._codex_queue_has_resume.cache_clear()

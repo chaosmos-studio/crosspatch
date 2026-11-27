@@ -108,6 +108,13 @@ evidence = [
   "The lead opens every file a message names before answering.",
 ]
 
+[delegation]
+# Only the human turns this on. When true, a BRIEF or REPLY from a lead carries the human's go-ahead
+# for the work it names, so builders act on it without asking the human again.
+# Each agent's own permission rules and the escalation rules above still apply.
+lead_speaks_for_human = false
+since = ""
+
 [safety]
 # Reject a message that looks like it holds a secret. Add patterns (Python regular expressions) for your own secrets.
 secret_check = true
@@ -150,6 +157,8 @@ class Agreement:
     secret_check: bool = True
     extra_patterns: tuple[str, ...] = ()
     allow_patterns: tuple[str, ...] = field(default_factory=tuple)
+    lead_speaks_for_human: bool = False
+    delegated_since: str = ""
 
     def role(self, name: str) -> Role:
         if name not in self.roles:
@@ -207,6 +216,10 @@ def parse_agreement(text: str, source: str = "bridge.toml") -> Agreement:
             re.compile(pattern)
         except re.error as exc:
             raise DataError(f"{source}: bad pattern {pattern!r}: {exc}") from None
+    delegation = data.get("delegation") or {}
+    speaks = delegation.get("lead_speaks_for_human", False)
+    if not isinstance(speaks, bool):
+        raise DataError(f"{source}: delegation.lead_speaks_for_human must be true or false")
     return Agreement(
         human=str(data.get("human", "human")),
         roles=roles,
@@ -219,6 +232,8 @@ def parse_agreement(text: str, source: str = "bridge.toml") -> Agreement:
         secret_check=bool(safety.get("secret_check", True)),
         extra_patterns=patterns,
         allow_patterns=allows,
+        lead_speaks_for_human=speaks,
+        delegated_since=str(delegation.get("since", "")),
     )
 
 

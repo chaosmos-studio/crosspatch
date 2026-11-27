@@ -71,7 +71,8 @@ def _body(args: argparse.Namespace) -> str:
 
 def _print_messages(project: Project, thread: registry.Thread, found: list[messages.Message], reader: str, agreement: Agreement) -> None:
     if reader != agreement.human and any(m.sender != agreement.human for m in found):
-        out(messages.AGENT_NOTICE)
+        carried = next((h for m in found if (h := registry.go_ahead_from(project, agreement, m.sender, m.kind))), "")
+        out(messages.delegation_notice(carried, agreement.delegated_since) if carried else messages.AGENT_NOTICE)
         out()
     for message in found:
         out(messages.format_message(project, thread, message))
@@ -86,7 +87,8 @@ def _wake_all(project: Project, agreement: Agreement, message: messages.Message,
         if member.wake.adapter == "poll":
             out(f"  {name}: will see it when it watches or checks pending")
             continue
-        notice = wake.Notice(project, message.thread, message.id, message.sender, message.kind, name)
+        carried = registry.go_ahead_from(project, agreement, message.sender, message.kind)
+        notice = wake.Notice(project, message.thread, message.id, message.sender, message.kind, name, carried)
         result = wake.wake_member(project, member, notice)
         state = "woken" if result.ok else "not woken"
         out(f"  {name}: {state} through {member.wake.adapter} ({result.detail})")

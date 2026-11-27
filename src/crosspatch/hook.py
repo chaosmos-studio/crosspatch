@@ -20,7 +20,7 @@ from crosspatch import fsutil, messages
 from crosspatch.agreement import load_agreement
 from crosspatch.errors import CrossError
 from crosspatch.project import Project, find_project
-from crosspatch.registry import Member, load_members, threads_of
+from crosspatch.registry import Member, go_ahead_from, load_members, threads_of
 from crosspatch.wake import Notice, claude_hook_lock
 
 WAKE_EXIT = 2
@@ -79,9 +79,11 @@ def run_wake_hook(stdin: TextIO, stderr: TextIO, max_seconds: float = HOOK_TIMEO
         while time.monotonic() < deadline:
             found = _new_for(project, member)
             if found:
+                agreement = load_agreement(project)
                 for thread, message in found:
                     messages.mark_notified(project, thread, member.name, [message.id])
-                    notice = Notice(project, thread, message.id, message.sender, message.kind, member.name)
+                    carried = go_ahead_from(project, agreement, message.sender, message.kind)
+                    notice = Notice(project, thread, message.id, message.sender, message.kind, member.name, carried)
                     print(notice.text(), file=stderr)
                 stderr.flush()
                 return WAKE_EXIT

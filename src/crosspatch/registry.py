@@ -157,6 +157,21 @@ def get_member(project: Project, agreement: Agreement, name: str) -> Member:
     raise UsageError(f"no member named {name!r}. Members: {known}. Add one with `crosspatch join`.")
 
 
+DELEGATED_KINDS = ("BRIEF", "REPLY")
+
+
+def go_ahead_from(project: Project, agreement: Agreement, sender: str, kind: str) -> str:
+    """The human whose instruction this message carries, or "" when it carries none.
+
+    Only a BRIEF or REPLY from a lead carries one, and only when the human turned on
+    `[delegation] lead_speaks_for_human` in bridge.toml.
+    """
+    if not agreement.lead_speaks_for_human or kind.upper() not in DELEGATED_KINDS:
+        return ""
+    member = load_members(project).get(sender)
+    return agreement.human if member is not None and member.role == "lead" else ""
+
+
 def join(project: Project, agreement: Agreement, member: Member, replace: bool = False) -> Member:
     check_name(member.name, "member")
     agreement.role(member.role)

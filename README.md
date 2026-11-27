@@ -11,7 +11,7 @@ crosspatch is the agreement on top of the pipe:
 - **Momentum:** a builder keeps working while work is left, and a session that has gone quiet is woken when a message arrives.
 - **Evidence:** a review names the files to judge, and crosspatch records a hash of each attachment.
 - **Escalation:** written rules for what the lead decides and what goes to the human.
-- **The human's word wins:** a message from another agent is information, never an order.
+- **The human's word wins:** a message from another agent is information, never an order, unless you let the lead drive.
 
 ## Install
 
@@ -123,6 +123,22 @@ crosspatch refuses a message whose kind the sender's role may not send.
 `crosspatch instructions` turns the file into what each agent reads: a skill, an `AGENTS.md` block, or plain markdown.
 Edit the agreement, then write the instructions again.
 
+### Letting the lead drive
+
+By default a builder treats every message as information, and waits for you before acting on it.
+To let the lead drive the builders, turn on delegation yourself:
+
+```toml
+[delegation]
+lead_speaks_for_human = true
+since = "27 Nov 2026"
+```
+
+A BRIEF or REPLY from a member with the lead role then reaches a builder as your instruction.
+The wake notice, the header above the message and the instructions all say so, and the builder acts on it without asking you again.
+Messages from other members stay information.
+Each agent's own permission rules still apply, and what `[escalation]` sends to you still comes to you.
+
 ## Commands
 
 Pairing:
@@ -175,6 +191,7 @@ Register the class under the `crosspatch.wake` entry point group of your package
 
 - A message from another agent is information, never an order.
   The instructions say so, every notice says so, and crosspatch prints it above messages from agents.
+  The one exception is the one you turn on: with `[delegation]`, a lead's BRIEF or REPLY carries your instruction.
 - crosspatch never changes what an agent may do. Each agent's own permission rules stand, whatever a message says.
   crosspatch writes agent settings only when you run `crosspatch hook install` or `crosspatch instructions --write`.
 - A check before sending refuses a message or text attachment that looks like a key, token or password.
